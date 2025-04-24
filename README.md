@@ -1,6 +1,7 @@
 # Locally Stationary Factor Model (LSFM)
 
-**Author:** Moka Kaleji  
+**Author:** Moka Kaleji • University of Bologna - Contact: mohammadkaleji1998@gmail.com
+
 **Based on:** Motta, Hafner & von Sachs (2011)
 
 This repo implements both estimation and forecasting for the LSFM on macroeconomic series.  
