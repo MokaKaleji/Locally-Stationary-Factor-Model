@@ -1,6 +1,13 @@
 # Locally Stationary Factor Model (LSFM)
 
-**Author:** Moka Kaleji • University of Bologna - Contact: mohammadkaleji1998@gmail.com
+**Author:** Moka Kaleji • Contact: mohammadkaleji1998@gmail.com
+
+**Affiliation:** Master Thesis in Econometrics:
+
+Advancing High-Dimensional Factor Models: Integrating Time-Varying 
+Loadings and Transition Matrix with Dynamic Factors.
+
+University of Bologna
 
 **Based on:** Motta, Hafner & von Sachs (2011)
 
