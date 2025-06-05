@@ -2,7 +2,7 @@
 % Author: Moka Kaleji • Contact: mohammadkaleji1998@gmail.com
 % Affiliation: Master Thesis in Econometrics: 
 % Advancing High-Dimensional Factor Models: Integrating Time-Varying 
-% Loadings and Transition Matrix with Dynamic Factors.
+% Parameters with Dynamic Factors.
 % University of Bologna
 % Description:
 %   Implements Locally Stationary Factor Model (LSFM) estimation following
@@ -22,7 +22,7 @@ clear; close all; clc;
 % load the corresponding data, specify the training sample size, and 
 % standardize the data for numerical stability in model estimation.
 % Explanation:
-% The dynamic factor model requires a multivariate time series dataset. 
+% The locally stationary factor model need a multivariate time series dataset. 
 % This section provides a user-friendly interface to choose between 
 % pre-processed monthly or quarterly datasets, ensuring flexibility in 
 % periodicity. The training sample size (T_train) is specified to focus on
@@ -97,8 +97,7 @@ assert(T_train>0 && T_train<T, 'T_train must be integer in (0, %d)', T);
 % to ill-conditioned matrices or biased factor estimates. The training data
 % (first T_train observations) is centered by subtracting the mean and scaled
 % by dividing by the standard deviation, computed across the training sample.
-% This ensures all variables contribute equally to the factor structure and
-% prevents numerical overflow in the EM algorithm.
+% This ensures all variables contribute equally to the factor structure.
 x_train = x(1:T_train, :);
 mean_train = mean(x_train);
 std_train  = std(x_train);
@@ -107,39 +106,19 @@ x_train_norm = (x_train - mean_train) ./ std_train;
 %% Running LSFM estimation 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 R = 6;
-h = 0.15;
+h = 0.2718116211;
 
-[CChat, Fhat_train, Lhat_train] = lsfm(x_train_norm, R, h);
+[LSFM] = lsfm(x_train_norm, R, h);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Save Results for Forecasting and Further Analysis 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-save('lsfm_estimation_results.mat', 'R', 'h', 'Fhat_train', ...
-    'Lhat_train', 'x_train', 'x_train_norm', 'mean_train', 'std_train', ...
+save('lsfm_estimation_results.mat', 'R', 'h', 'LSFM', ...
+    'x_train', 'x_train_norm', 'mean_train', 'std_train', ...
     'T_train', 'N');
+LogL = LSFM.logL;
+disp(['Log Likelihood: ', num2str(LogL)]);
 disp('LSFM estimation complete. Results saved.');
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Variance Explained by Factors 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Use temporary bandwidth for variance-explained diagnostics
-q_max = 15;  % Maximum allowable factors
-h_temp = 0.1;
-[CChat_temp, ~, ~, Sigmahat] = lsfm(x_train_norm, q_max, h_temp);
-% Compute eigenvalues of weighted covariance matrices over time
-[Tt, N] = size(x_train_norm);
-eigvals = NaN(N, T_train);
-for t = 1:T_train
-    Sigma_t = squeeze(Sigmahat(:,:,t));
-    eigvals(:,t) = sort(real(eig(Sigma_t)), 'descend');
-end
-% Proportion of variance explained by each eigenvalue
-cum_var_explained = cumsum(eigvals, 1) ./ sum(eigvals,1);
-mean_var_explained = mean(cum_var_explained, 2);
-% Display diagnostic for chosen q_opt
-var_explained_opt = mean_var_explained(R);
-disp(['Average variance explained by q = ', num2str(R), ': ', ...
-    num2str(var_explained_opt*100), '%']);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Main Function 
@@ -153,7 +132,7 @@ disp(['Average variance explained by q = ', num2str(R), ': ', ...
 %   - Dahlhaus, R. (1996)
 %   - Motta G, Hafner CM, von Sachs R. (2011)
 
-function [CChat, Fhat, Lhat, Sigmahat] = lsfm(X, R, h)
+function [LSFM] = lsfm(X, R, h)
 % Mathematical Formulation:
 % For each t, compute a local covariance matrix:
 % Sigma_t = sum(w_{t,s} * X_s * X_s'),  w_{t,s} = K((u_s - u_t)/h) / sum(K)
@@ -165,10 +144,11 @@ function [CChat, Fhat, Lhat, Sigmahat] = lsfm(X, R, h)
 %   R: Number of factors
 %   h: Bandwidth for kernel smoothing
 % Outputs:
-%   CChat: T x N common components
-%   Fhat: T x R factors
-%   Lhat: N x R x T loadings
-%   Sigmahat: N x N x T covariance matrices
+%   LSFM.CChat: T x N common components
+%   LSFM.Fhat: T x R factors
+%   LSFM.Lhat: N x R x T loadings
+%   LSFM.Sigmahat: N x N x T covariance matrices
+%   LSFM.logL: log likelihood 
 
     % --- Dimensions ---
     [T, N] = size(X);
@@ -219,24 +199,57 @@ function [CChat, Fhat, Lhat, Sigmahat] = lsfm(X, R, h)
         % Adjust sign of eigenvectors for consistency
         sign_adjust = diag(sign(A(1,:)));
         A_adjusted = A * sign_adjust;
+
+        E = X - squeeze( sum( Lhat .* reshape(Fhat',1,R,T), 2 ) )';        % T×N residuals
+
+        % estimate idiosyncratic variances directly
+        sigma_e_vec = mean( E.^2, 1 )';                                    % N×1 vector of idio variances
+        Sigma_e_hat = diag( sigma_e_vec );
         
         % Initialize loadings and factors per user's request
         Lhat(:,:,t) = A_adjusted .* sqrt_eigenvalues';                     % Lhat = A * sqrt(D), scaling each column
         A_scaled = A_adjusted ./ sqrt_eigenvalues';                        % For Fhat = X * A / sqrt(D)
         Fhat(t,:) = X(t,:) * A_scaled;                                     % Factors scaled inversely
         CChat(t,:) = Fhat(t,:) * Lhat(:,:,t)';                             % Common component
-    end
+    end                    
+
+% Inputs:
+%   X            T×N data matrix
+%   Lhat         N×R×T array of time-varying loadings
+%   sigma_e_vec  N×1 vector of idiosyncratic variances (constant over t)
+
+[T, N] = size(X);
+logL = 0;
+
+for t = 1:T
+    % 1) build the marginal covariance
+    Lt = Lhat(:,:,t);                    % N×R
+    Sigma_idio = diag(sigma_e_vec);      % N×N
+    S_t = Lt*Lt' + Sigma_idio;           % N×N
+
+    % 2) compute log-determinant directly
+    logdet_S_t = log(det(S_t));          % scalar
+
+    % 3) extract the observation
+    x_t = X(t,:)';                       % N×1
+
+    % 4) quadratic form via backslash
+    quad = x_t' * (S_t \ x_t);           % scalar
+
+    % 5) accumulate full Gaussian log-likelihood
+    logL = logL ...
+         - 0.5 * (logdet_S_t ...         % log |S_t|
+                    + quad );            % x_t' S_t^{-1} x_t
 end
 
-%[[[[[  % Extract R largest eigenvectors as loadings
-%       [A,~] = eigs(Sigma_t, R, 'largestabs', opts);
-%       Lhat(:,:,t) = A * diag(sign(A(1,:)));
-        % Compute factors via generalized least squares
-%       Fhat(t,:)   = X(t,:) * A;
-        % Compute common components
-%       CChat(t,:)  = (A * Fhat(t,:)')';
-        %C = Fhat' * Fhat / T;           % Factor covariance
-        %[V, D] = eig(C);                % Eigen-decomposition
-        %D_inv_sqrt = diag(1 ./ sqrt(diag(D)));
-        %Fhat = Fhat * V * D_inv_sqrt; % Rotated factors
-        %Lhat(:,:,t) = Lhat(:,:,t) * V * inv(D_inv_sqrt);]]]]]
+
+
+
+
+    % --- Results --- %
+    LSFM.CChat=CChat;
+    LSFM.Fhat=Fhat;
+    LSFM.Lhat=Lhat;
+    LSFM.Sigma_e_hat=Sigma_e_hat;
+    LSFM.logL=logL;
+end
