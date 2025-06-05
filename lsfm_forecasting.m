@@ -19,7 +19,7 @@ clear; close all; clc;
 % corresponding data.
 % Explanation: Presents a dialog for selecting between monthly (MD1959.xlsx)
 % or quarterly (QD1959.xlsx) datasets, loads the chosen data, and defines 
-% key variables (GDP, Unemployment, Inflation, 1-Year Treasury - 3-Month Treasury)
+% key variables (GDP, Unemployment, Inflation)
 % for forecasting evaluation. The datasets are high-dimensional time series
 % used in macroeconomic forecasting, with specific indices for key variables.
 % References:
