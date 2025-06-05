@@ -2,7 +2,7 @@
 % Author: Moka Kaleji • Contact: mohammadkaleji1998@gmail.com
 % Affiliation: Master Thesis in Econometrics: 
 % Advancing High-Dimensional Factor Models: Integrating Time-Varying 
-% Loadings and Transition Matrix with Dynamic Factors.
+% Parameters with Dynamic Factors.
 % University of Bologna
 % Description:
 %   Executes forecasting for selected macroeconomic indicators (GDP, Unemployment,
@@ -48,24 +48,23 @@ switch choiceIndex
         T = 790;
         tableData = readtable(filepath);
         x = table2array(tableData);
-        key_vars = [1, 24, 105, 77];                                       % Indices for key variables
+        key_vars = [1, 24, 105];                                       % Indices for key variables
     case 2
         filepath = ['/Users/moka/Research/Thesis/Live Project/' ...
             'Processed_Data/QD1959.xlsx'];
         T = 264;
         tableData = readtable(filepath);
         x = table2array(tableData(:,2:end));                               % Exclude ate column
-        key_vars = [1, 58, 116, 147];                                      % Indices for key variables
+        key_vars = [1, 58, 116];                                      % Indices for key variables
     otherwise
         error('Unexpected selection index.');
 end
-var_names = {'GDP', 'Unemployment', 'Inflation', '1_Y Treasury - 3_M Treasury'};
+var_names = {'GDP', 'Unemployment', 'Inflation'};
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Load LSFM Estimation Outputs
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-load('lsfm_estimation_results.mat', 'Fhat_train', 'Lhat_train', 'T_train', ...
-    'mean_train', 'std_train', 'N');
+load('lsfm_estimation_results.mat');
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Forecast Settings
@@ -96,7 +95,7 @@ x_test_norm = (x_test - mean_train) ./ std_train;  % Normalize as in training
 %% Running Forecast Via LSFM + VAR
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Forecast standardized observations using factor forecasts
-yhat_norm = LSFM_Forecast(Fhat_train, Lhat_train, T_train, N, H, p_opt);
+yhat_norm = LSFM_Forecast(LSFM, T_train, N, H, p_opt);
 % Rescale forecasts to original units
 yhat = yhat_norm .* std_train + mean_train;
 
@@ -139,6 +138,7 @@ end
 % Explanation: The random walk forecast assumes y_{t+h} = y_t, using the 
 % last training observation. MSFE ratios (DFTLTA vs. RW) indicate relative 
 % performance.yhat_rw = repmat(x(T_train, :), H, 1);
+yhat_rw = repmat(x(T_train, :), H, 1);
 squared_errors_rw = (x_test(:, key_vars) - yhat_rw(:, key_vars)).^2;
 MSFE_rw_all = mean(squared_errors_rw, 1);
 MSFE_ratio_rw = MSFE_all ./ MSFE_rw_all;
@@ -226,9 +226,9 @@ for k = 1:length(key_vars)
     p_a1      = 2*(1 - tcdf(abs(t_a1), dfree));
 
     fprintf('\nEncompassing tests for %s:\n', var_names{k});
-    fprintf(' DFTL vs RW:  \tβ̂=%.3f, t=%.2f, p=%.3f\n', beta_rw(2), ...
+    fprintf(' LSFM  vs RW:  \tβ̂=%.3f, t=%.2f, p=%.3f\n', beta_rw(2), ...
         t_rw,   p_rw);
-    fprintf(' DFTL vs AR1: \tβ̂=%.3f, t=%.2f, p=%.3f\n', beta_a1(2), ...
+    fprintf(' LSFM  vs AR1: \tβ̂=%.3f, t=%.2f, p=%.3f\n', beta_a1(2), ...
         t_a1, p_a1);
 end
 % --- Ljung-Box Test ---
@@ -237,8 +237,9 @@ end
 % autocorrelations up to maxLags, testing the null hypothesis of no 
 % autocorrelation against the alternative of serial correlation.
 if H > 1
-maxLags = ceil(H/3);      % how many lags to test
+maxLags = 3;      % how many lags to test
 alpha   = 0.05;    % significance level
+
 
 % Compute residuals matrix (H×4)
 residuals = x_test(:, key_vars) - yhat(:, key_vars);
@@ -268,10 +269,6 @@ for k = 1:length(key_vars)
 end
 else
 end
-% Helper for printing
-function s = ternary(cond, a, b)
-    if cond, s = a; else s = b; end
-end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Visualization 
@@ -286,51 +283,62 @@ end
 % Explanation: Computes the correlation matrix of estimated factors and 
 % finds the pair with the highest absolute correlation, useful for 
 % understanding factor relationships.
-corr_matrix = corr(Fhat_train);
+corr_matrix = corr(LSFM.Fhat);
 lower_tri = tril(corr_matrix, -1);
 [~, max_idx] = max(abs(lower_tri(:)));
 [i, j] = ind2sub(size(lower_tri), max_idx);
 disp(['Most correlated factors: ', num2str(i), ' & ', num2str(j)]);
 
 max_lags = 10;
-[cross_corr, lags] = xcorr(Fhat_train(:,i), Fhat_train(:,j), max_lags, ...
+[cross_corr, lags] = xcorr(LSFM.Fhat(:,i), LSFM.Fhat(:,j), max_lags, ...
     'coeff');
 
-figure('Position', [100, 100, 1200, 800]);
-
 % MSFE over forecast horizon
-subplot(3,4,1);
+fig1=figure;
 plot(1:H, MSFE_horizon, '-o', 'LineWidth', 1.5);
 title('MSFE by Horizon'); xlabel('Horizon'); ylabel('MSFE'); grid on;
+exportgraphics(fig1, 'MSFE_by_Horizon.pdf', 'ContentType', 'vector', 'Resolution', 300);
 
 % Actual vs Forecast for key variables
-for idx = 1:4
-    subplot(3,4,1+idx);
+for idx = 1:3
+    fig=figure;
     plot(1:T_train, x(1:T_train, key_vars(idx)), 'b-', 'DisplayName', ...
         'Train Actual'); hold on;
+    plot(1:T_train, LSFM.CChat(1:T_train, key_vars(idx)), 'r--', 'DisplayName', ...
+        'Estimate'); hold on;
     plot(T_train+1:T_train+H, x_test(:, key_vars(idx)), 'k-', ...
         'DisplayName', 'Test Actual');
-    plot(T_train+1:T_train+H, yhat(:, key_vars(idx)), 'r--', ...
+    plot(T_train+1:T_train+H, yhat(:, key_vars(idx)), 'g-', ...
         'DisplayName', 'Forecast');
     hold off; title(var_names{idx});
     xlabel('Time'); ylabel('Value'); grid on;
-    if idx==1, legend('Location', 'Best'); end
+    % Formatting
+    title(var_names{idx});
+    xlabel('Time'); ylabel('Value'); grid on;
+    legend('Location', 'Best');
+
+    % Save the figure as high-res PDF
+    filename = sprintf('Forecast_Var_%s.pdf', var_names{idx});
+    exportgraphics(fig, filename, 'ContentType', 'vector', 'Resolution', 300);
+
+    % Close the figure to avoid clutter
+    close(fig);
 end
 
 % Histogram of MSFE across variables
-subplot(3,4,6);
+fig6=figure;
 histogram(MSFE_all, 10);
 title('MSFE Distribution'); xlabel('MSFE'); ylabel('Frequency'); grid on;
 
 % Time series of factors
-subplot(3,4,7);
-plot(Fhat_train, 'LineWidth', 1.5);
+fig7=figure;
+plot(LSFM.Fhat, 'LineWidth', 1.5);
 title('Estimated Factors over Time'); xlabel('Time'); ylabel('Value');
-legend(arrayfun(@(k)['Factor ' num2str(k)], 1:size(Fhat_train,2), ...
+legend(arrayfun(@(k)['Factor ' num2str(k)], 1:size(LSFM.Fhat,2), ...
     'UniformOutput', false), 'Location', 'Best'); grid on;
 
 % Cross-correlogram of most correlated pair
-subplot(3,4,8);
+fig8=figure;
 stem(lags, cross_corr, 'LineWidth', 1.5);
 title(['Cross-Correlogram: Factor ' num2str(i) ' vs ' num2str(j)]);
 xlabel('Lag'); ylabel('Corr'); grid on;
@@ -338,20 +346,19 @@ xlabel('Lag'); ylabel('Corr'); grid on;
 sgtitle(sprintf('LSFM Forecasting: p=%d', p_opt));
 
 % MSFE Ratio Bar Chart
-subplot(3,4,9);
+fig2=figure;
 bar([MSFE_ratio_rw; MSFE_ratio_ar1]');
-title('MSFE Ratios: DFTL vs RW and AR(1)');
+title('MSFE Ratios: LSFM vs RW and AR(1)');
 xticklabels(var_names); ylabel('Ratio');
-legend('DFTL / RW', 'DFTL / AR(1)', 'Location', 'Best'); grid on;
+legend('LSFM / RW', 'LSFM / AR(1)', 'Location', 'Best'); grid on;
 
-sgtitle(sprintf('LSFM Forecasting Performance: p=%d', p_opt));
+exportgraphics(fig2, 'MSFE Ratio.pdf', 'ContentType', 'vector', 'Resolution', 300);
 
 % MSFE per Horizon for Key Variables (Individual)
-subplot(3,4,10);
+fig9=figure;
 plot(1:H, squared_errors(:,1), '-o', 'LineWidth', 1.3); hold on;
 plot(1:H, squared_errors(:,2), '-s', 'LineWidth', 1.3);
 plot(1:H, squared_errors(:,3), '-d', 'LineWidth', 1.3);
-plot(1:H, squared_errors(:,4), '-^', 'LineWidth', 1.3);
 hold off;
 title('MSFE per Horizon for Key Variables');
 xlabel('Horizon'); ylabel('Squared Error');
@@ -365,13 +372,13 @@ disp('Forecasting and visualization complete.');
 %% Main Forecast Function
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Forecasts H-step-ahead observations via VAR on latent factors
-function [yhat] = LSFM_Forecast(Fhat, Lhat, T, N, H, p)
-    q = size(Fhat, 2);
+function [yhat] = LSFM_Forecast(LSFM, T, N, H, p)
+    q = size(LSFM.Fhat, 2);
     if p >= T, p = floor(T/2); end
     mdl = varm(q, p);
-    EstMdl = estimate(mdl, Fhat);
-    Ff = forecast(EstMdl, H, Fhat);
-    Lambda_T = squeeze(Lhat(:,:,T));
+    EstMdl = estimate(mdl, LSFM.Fhat);
+    Ff = forecast(EstMdl, H, LSFM.Fhat);
+    Lambda_T = squeeze(LSFM.Lhat(:,:,T));
     yhat = zeros(H, N);
     for h = 1:H
         yhat(h,:) = (Lambda_T * Ff(h,:)')';
